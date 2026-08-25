@@ -119,28 +119,36 @@ export class CippToolHandler {
             surname,
             jobTitle,
             department,
+            usageLocation,
             country,
+            mustChangePasswordNextSignIn,
           } = args as {
             tenantFilter: string;
             displayName: string;
             userPrincipalName: string;
-            password: string;
+            password?: string;
             givenName?: string;
             surname?: string;
             jobTitle?: string;
             department?: string;
+            usageLocation?: string;
             country?: string;
+            mustChangePasswordNextSignIn?: boolean;
           };
           const userData: Record<string, unknown> = {
             displayName,
             userPrincipalName,
-            password,
           };
+          if (password !== undefined) userData.password = password;
           if (givenName !== undefined) userData.givenName = givenName;
           if (surname !== undefined) userData.surname = surname;
           if (jobTitle !== undefined) userData.jobTitle = jobTitle;
           if (department !== undefined) userData.department = department;
+          if (usageLocation !== undefined) userData.usageLocation = usageLocation;
           if (country !== undefined) userData.country = country;
+          if (mustChangePasswordNextSignIn !== undefined) {
+            userData.mustChangePasswordNextSignIn = mustChangePasswordNextSignIn;
+          }
           result = await this.cippService.createUser(tenantFilter, userData);
           break;
         }
@@ -153,8 +161,6 @@ export class CippToolHandler {
             jobTitle,
             department,
             usageLocation,
-            licenses,
-            removeLicenses,
           } = args as {
             tenantFilter: string;
             userId: string;
@@ -162,22 +168,27 @@ export class CippToolHandler {
             jobTitle?: string;
             department?: string;
             usageLocation?: string;
-            licenses?: string[];
-            removeLicenses?: boolean;
           };
           const editData: Record<string, unknown> = {};
           if (displayName !== undefined) editData.displayName = displayName;
           if (jobTitle !== undefined) editData.jobTitle = jobTitle;
           if (department !== undefined) editData.department = department;
           if (usageLocation !== undefined) editData.usageLocation = usageLocation;
-          const licenseOptions =
-            licenses !== undefined || removeLicenses !== undefined
-              ? {
-                  ...(licenses !== undefined ? { licenses } : {}),
-                  ...(removeLicenses !== undefined ? { removeLicenses } : {}),
-                }
-              : undefined;
-          result = await this.cippService.editUser(tenantFilter, userId, editData, licenseOptions);
+          result = await this.cippService.editUser(tenantFilter, userId, editData);
+          break;
+        }
+
+        case 'cipp_manage_user_licenses': {
+          const { tenantFilter, userId, addLicenseSkuIds, removeLicenseSkuIds } = args as {
+            tenantFilter: string;
+            userId: string;
+            addLicenseSkuIds?: string[];
+            removeLicenseSkuIds?: string[];
+          };
+          result = await this.cippService.manageUserLicenses(tenantFilter, userId, {
+            addLicenseSkuIds,
+            removeLicenseSkuIds,
+          });
           break;
         }
 
@@ -188,12 +199,16 @@ export class CippToolHandler {
         }
 
         case 'cipp_reset_password': {
-          const { tenantFilter, userId, newPassword } = args as {
+          const { tenantFilter, userId, mustChangePasswordNextSignIn } = args as {
             tenantFilter: string;
             userId: string;
-            newPassword?: string;
+            mustChangePasswordNextSignIn?: boolean;
           };
-          result = await this.cippService.resetPassword(tenantFilter, userId, newPassword);
+          result = await this.cippService.resetPassword(
+            tenantFilter,
+            userId,
+            mustChangePasswordNextSignIn
+          );
           break;
         }
 
@@ -254,28 +269,30 @@ export class CippToolHandler {
           break;
         }
 
-        case 'cipp_create_group': {
+        case 'cipp_create_distribution_group': {
           const {
             tenantFilter,
             displayName,
             description,
-            securityEnabled,
-            mailEnabled,
-            mailNickname,
+            primaryEmailAddress,
+            allowExternal,
+            owners,
+            members,
           } = args as {
             tenantFilter: string;
             displayName: string;
             description?: string;
-            securityEnabled?: boolean;
-            mailEnabled?: boolean;
-            mailNickname?: string;
+            primaryEmailAddress: string;
+            allowExternal?: boolean;
+            owners?: string[];
+            members?: string[];
           };
-          const groupData: Record<string, unknown> = { displayName };
+          const groupData: Record<string, unknown> = { displayName, primaryEmailAddress };
           if (description !== undefined) groupData.description = description;
-          if (securityEnabled !== undefined) groupData.securityEnabled = securityEnabled;
-          if (mailEnabled !== undefined) groupData.mailEnabled = mailEnabled;
-          if (mailNickname !== undefined) groupData.mailNickname = mailNickname;
-          result = await this.cippService.createGroup(tenantFilter, groupData);
+          if (allowExternal !== undefined) groupData.allowExternal = allowExternal;
+          if (owners !== undefined) groupData.owners = owners;
+          if (members !== undefined) groupData.members = members;
+          result = await this.cippService.createDistributionGroup(tenantFilter, groupData);
           break;
         }
 

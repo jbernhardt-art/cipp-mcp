@@ -4,7 +4,7 @@ MCP (Model Context Protocol) server for [CIPP](https://github.com/KelvinTegelaar
 
 ## Features
 
-- **37 tools** across 11 categories
+- **42 tools** across 11 categories
 - Tenant, user, group, and mailbox management
 - Security: Conditional Access policies, named locations
 - Standards & compliance: BPA, domain health, drift detection
@@ -61,14 +61,13 @@ tools above are exposed and callable. Add exact tool names to
 reviewing the operation. Calls to tools outside the allowlist are rejected even
 if an MCP client attempts to invoke them directly.
 
-For CIPP 10.9.1 or later, the optional
-`cipp_modify_distribution_group_member` tool can add or remove one user at a
-time from a verified cloud-managed distribution list. It requires
-`Identity.Group.Read`, `Identity.User.Read`, and `Identity.Group.ReadWrite` on
-the CIPP API client.
-Add `cipp_list_groups,cipp_modify_distribution_group_member` to
-`CIPP_ENABLED_TOOLS` only when that write capability is intentional. The
-wrapper rejects all-tenants operations and every other group type.
+For CIPP 10.9.1 or later, reviewed write tools cover user lifecycle, selected
+mailbox settings, and classic distribution groups. Each write remains disabled
+unless its exact name is present in `CIPP_ENABLED_TOOLS`. The distribution-group
+membership wrapper rejects all-tenants operations and every other group type.
+Password resets use a CIPP-generated random password and return CIPP's
+`copyField`, which contains either that password or the configured Password
+Pusher link.
 
 > [!IMPORTANT]
 > `CIPP_BASE_URL` must be the **Azure Function App** URL — the CIPP-API backend,
@@ -108,8 +107,8 @@ Add to your `claude_desktop_config.json`:
 | Category | Tools |
 |---|---|
 | Tenants | list_tenants, get_tenant_details |
-| Users | list_users, create_user, edit_user, disable_user, reset_password, reset_mfa, revoke_sessions, offboard_user, bec_check, list_mfa_users, list_user_devices, list_user_groups |
-| Groups | list_groups, create_group |
+| Users | list_users, create_user, edit_user, manage_user_licenses, disable_user, reset_password, reset_mfa, revoke_sessions, offboard_user, bec_check, list_mfa_users, list_user_devices, list_user_groups |
+| Groups | list_groups, create_distribution_group, modify_distribution_group_member |
 | Mailboxes | list_mailboxes, list_mailbox_permissions, set_out_of_office, set_email_forwarding |
 | Security | list_conditional_access_policies, list_named_locations |
 | Standards | list_standards, run_standards_check, list_bpa, list_domain_health |

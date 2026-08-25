@@ -54,6 +54,8 @@ const DOMAIN_HEALTH_CHECK_TIMEOUT_MS = 15_000;
 const CIPP_FAILURE_RE =
   /fail|error|could not|unable|not permitted|already exists|does not exist/i;
 
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Normalise a CIPP `Results` payload — a string, an array, or absent — into
  * strings, and flag the entries that report a failure. Parse, never assume.
@@ -470,7 +472,63 @@ export class CippService {
     tenantFilter: string,
     userData: Record<string, unknown>
   ): Promise<T> {
-    return this.request<T>('POST', 'AddUser', undefined, { tenantFilter, ...userData });
+    const tenant = tenantFilter.trim();
+    const upn = nonEmpty(userData.userPrincipalName)
+      ? userData.userPrincipalName.trim()
+      : '';
+    const at = upn.lastIndexOf('@');
+
+    if (!tenant || tenant.toLowerCase() === 'alltenants') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'tenantFilter must identify exactly one tenant; allTenants is not allowed for user creation.'
+      );
+    }
+    if (at < 1 || at === upn.length - 1) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'userPrincipalName must be a complete UPN, such as alice@contoso.com.'
+      );
+    }
+
+    const body: Record<string, unknown> = {
+      tenantFilter: tenant,
+      username: upn.slice(0, at),
+      Domain: upn.slice(at + 1),
+      displayName: userData.displayName,
+      MustChangePass: userData.mustChangePasswordNextSignIn !== false,
+    };
+    for (const key of [
+      'password',
+      'givenName',
+      'surname',
+      'jobTitle',
+      'department',
+      'usageLocation',
+      'country',
+    ]) {
+      if (userData[key] !== undefined) body[key] = userData[key];
+    }
+
+    const response = await this.request<{ Results?: unknown; User?: unknown; CopyFrom?: unknown }>(
+      'POST',
+      'AddUser',
+      undefined,
+      body
+    );
+    const { results, failures } = interpretResults(response?.Results);
+
+    return {
+      status: failures.length > 0 ? 'failed' : 'created',
+      userPrincipalName: upn,
+      results,
+      failures,
+      cippResponse: response,
+      message:
+        failures.length > 0
+          ? `CIPP reported failures creating ${upn}. Do NOT report success: ${failures.join(' | ')}`
+          : `CIPP reports that user ${upn} was created.`,
+    } as T;
   }
 
   /**
@@ -489,8 +547,13 @@ export class CippService {
   private async resolveUserIdentity(
     tenantFilter: string,
     upnOrId: string
-  ): Promise<{ id: string; userPrincipalName: string; username: string; domain: string }> {
-    const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  ): Promise<{
+    id: string;
+    userPrincipalName: string;
+    username: string;
+    domain: string;
+    assignedLicenseSkuIds: string[];
+  }> {
     const byId = GUID_RE.test(upnOrId);
 
     const rows = await this.request<Array<Record<string, unknown>>>('GET', 'ListUsers', {
@@ -520,7 +583,25 @@ export class CippService {
     }
 
     const at = upn.lastIndexOf('@');
-    return { id, userPrincipalName: upn, username: upn.slice(0, at), domain: upn.slice(at + 1) };
+    const assignedLicenseSkuIds = Array.isArray(match?.assignedLicenses)
+      ? match.assignedLicenses
+          .map((license) =>
+            typeof license === 'object' &&
+            license !== null &&
+            typeof license.skuId === 'string'
+              ? license.skuId
+              : undefined
+          )
+          .filter((skuId): skuId is string => skuId !== undefined)
+      : [];
+
+    return {
+      id,
+      userPrincipalName: upn,
+      username: upn.slice(0, at),
+      domain: upn.slice(at + 1),
+      assignedLicenseSkuIds,
+    };
   }
 
   /**
@@ -582,6 +663,79 @@ export class CippService {
     } as T;
   }
 
+  /** Add and/or remove specific license SKUs without replacing unmentioned licenses. */
+  async manageUserLicenses<T = unknown>(
+    tenantFilter: string,
+    userId: string,
+    changes: { addLicenseSkuIds?: string[]; removeLicenseSkuIds?: string[] }
+  ): Promise<T> {
+    const add = [...new Set(changes.addLicenseSkuIds ?? [])];
+    const remove = [...new Set(changes.removeLicenseSkuIds ?? [])];
+
+    if (add.length === 0 && remove.length === 0) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'At least one addLicenseSkuIds or removeLicenseSkuIds value is required.'
+      );
+    }
+    const invalid = [...add, ...remove].find((skuId) => !GUID_RE.test(skuId));
+    if (invalid) {
+      throw new McpError(ErrorCode.InvalidParams, `License SKU IDs must be GUIDs; got "${invalid}".`);
+    }
+    const removeNormalized = new Set(remove.map((skuId) => skuId.toLowerCase()));
+    const overlap = add.find((skuId) => removeNormalized.has(skuId.toLowerCase()));
+    if (overlap) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `License SKU ${overlap} cannot be added and removed in the same operation.`
+      );
+    }
+
+    const identity = await this.resolveUserIdentity(tenantFilter, userId);
+    const desired = new Map(
+      identity.assignedLicenseSkuIds.map((skuId) => [skuId.toLowerCase(), skuId])
+    );
+    for (const skuId of add) desired.set(skuId.toLowerCase(), skuId);
+    for (const skuId of remove) desired.delete(skuId.toLowerCase());
+
+    const desiredSkuIds = [...desired.values()];
+    const currentNormalized = identity.assignedLicenseSkuIds.map((v) => v.toLowerCase()).sort();
+    const desiredNormalized = desiredSkuIds.map((v) => v.toLowerCase()).sort();
+    if (JSON.stringify(currentNormalized) === JSON.stringify(desiredNormalized)) {
+      return {
+        status: 'no_change',
+        userPrincipalName: identity.userPrincipalName,
+        message: `No license change was needed for ${identity.userPrincipalName}.`,
+      } as T;
+    }
+
+    const body: Record<string, unknown> = {
+      tenantFilter,
+      id: identity.id,
+      username: identity.username,
+      Domain: identity.domain,
+      ...(desiredSkuIds.length > 0
+        ? { licenses: desiredSkuIds.map((skuId) => ({ value: skuId })), removeLicenses: false }
+        : { removeLicenses: true }),
+    };
+    const response = await this.request<{ Results?: unknown }>('PATCH', 'EditUser', undefined, body);
+    const { results, failures } = interpretResults(response?.Results);
+
+    return {
+      status: failures.length > 0 ? 'failed' : 'modified',
+      userPrincipalName: identity.userPrincipalName,
+      requestedAddLicenseSkuIds: add,
+      requestedRemoveLicenseSkuIds: remove,
+      resultingLicenseSkuIds: desiredSkuIds,
+      results,
+      failures,
+      message:
+        failures.length > 0
+          ? `CIPP reported failures changing licenses for ${identity.userPrincipalName}. Do NOT report success: ${failures.join(' | ')}`
+          : `CIPP reports that licenses were updated for ${identity.userPrincipalName}.`,
+    } as T;
+  }
+
   /**
    * Disable a user account, preventing sign-in.
    * Calls the `ExecDisableUser` Azure Function.
@@ -601,19 +755,37 @@ export class CippService {
    * Calls the `ExecResetPass` Azure Function.
    *
    * @param tenantFilter - Tenant domain or identifier.
-   * @param userId       - Azure AD object ID of the user.
-   * @param newPassword  - Optional explicit password; omit to let CIPP generate one.
+   * @param userId       - Azure AD object ID or UPN of the user.
+   * @param mustChangePasswordNextSignIn - Whether a cloud-only user must change the generated password.
    */
   async resetPassword<T = unknown>(
     tenantFilter: string,
     userId: string,
-    newPassword?: string
+    mustChangePasswordNextSignIn = true
   ): Promise<T> {
-    return this.request<T>('POST', 'ExecResetPass', undefined, {
+    const identity = await this.resolveUserIdentity(tenantFilter, userId);
+    const response = await this.request<{ Results?: unknown }>('POST', 'ExecResetPass', undefined, {
       tenantFilter,
-      ID: userId,
-      ...(newPassword && { newPassword }),
+      ID: identity.id,
+      displayName: identity.userPrincipalName,
+      MustChange: mustChangePasswordNextSignIn,
     });
+    const { results, failures } = interpretResults(response?.Results);
+
+    return {
+      status: failures.length > 0 ? 'failed' : 'reset',
+      userPrincipalName: identity.userPrincipalName,
+      mustChangePasswordNextSignIn,
+      results,
+      failures,
+      // Preserve CIPP's copyField, which contains either the generated
+      // password or the configured Password Pusher link for the engineer.
+      cippResponse: response,
+      message:
+        failures.length > 0
+          ? `CIPP reported a password-reset failure for ${identity.userPrincipalName}. Do NOT report success: ${failures.join(' | ')}`
+          : `CIPP reports that the password was reset for ${identity.userPrincipalName}.`,
+    } as T;
   }
 
   /**
@@ -794,18 +966,63 @@ export class CippService {
     return this.request<T>('GET', 'ListGroups', { tenantFilter, ...params });
   }
 
-  /**
-   * Create a new Azure AD group in a tenant.
-   * Calls the `AddGroup` Azure Function.
-   *
-   * @param tenantFilter - Tenant domain or identifier.
-   * @param groupData    - Group properties (displayName, groupType, etc.).
-   */
-  async createGroup<T = unknown>(
+  /** Create one classic Exchange distribution group through CIPP AddGroup. */
+  async createDistributionGroup<T = unknown>(
     tenantFilter: string,
     groupData: Record<string, unknown>
   ): Promise<T> {
-    return this.request<T>('POST', 'AddGroup', undefined, { tenantFilter, ...groupData });
+    const tenant = tenantFilter.trim();
+    const primaryEmailAddress = nonEmpty(groupData.primaryEmailAddress)
+      ? groupData.primaryEmailAddress.trim()
+      : '';
+    if (!tenant || tenant.toLowerCase() === 'alltenants') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'tenantFilter must identify exactly one tenant; allTenants is not allowed for group creation.'
+      );
+    }
+    if (!/^[^\s@]+@[^\s@]+$/.test(primaryEmailAddress)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'primaryEmailAddress must be a complete email address for the new distribution group.'
+      );
+    }
+
+    const body: Record<string, unknown> = {
+      tenantFilter: tenant,
+      displayName: groupData.displayName,
+      description: groupData.description,
+      groupType: 'Distribution',
+      username: primaryEmailAddress,
+      primaryEmailAddress,
+      allowExternal: groupData.allowExternal === true,
+    };
+    if (Array.isArray(groupData.owners) && groupData.owners.length > 0) {
+      body.owners = groupData.owners;
+    }
+    if (Array.isArray(groupData.members) && groupData.members.length > 0) {
+      body.members = groupData.members;
+    }
+
+    const response = await this.request<{ Results?: unknown }>(
+      'POST',
+      'AddGroup',
+      undefined,
+      body
+    );
+    const { results, failures } = interpretResults(response?.Results);
+    return {
+      status: failures.length > 0 ? 'failed' : 'created',
+      displayName: groupData.displayName,
+      primaryEmailAddress,
+      results,
+      failures,
+      cippResponse: response,
+      message:
+        failures.length > 0
+          ? `CIPP reported failures creating distribution group ${primaryEmailAddress}. Do NOT report success: ${failures.join(' | ')}`
+          : `CIPP reports that distribution group ${primaryEmailAddress} was created.`,
+    } as T;
   }
 
   /**

@@ -119,14 +119,15 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
     name: 'cipp_create_user',
     description:
       '⚠ HIGH-IMPACT. Creates a new user account in the tenant, which grants ' +
-      'directory presence and may include initial credentials and license/role ' +
-      'eligibility. Reversible by deleting or disabling the user. ' +
+      'directory presence and initial credentials. CIPP generates a password when ' +
+      'one is not supplied and returns it or a Password Pusher link. ' +
+      'Reversible by deleting or disabling the user. ' +
       'Confirm with the user before invoking.',
     annotations: {
       title: 'Create user (high-impact)',
       readOnlyHint: false,
       destructiveHint: true,
-      idempotentHint: true,
+      idempotentHint: false,
       openWorldHint: true,
     },
     inputSchema: {
@@ -146,7 +147,7 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
         password: {
           type: 'string',
           description:
-            'Initial password for the account. Should meet the tenant password complexity policy.',
+            'Optional initial password. Omit to let CIPP generate one and return it or a Password Pusher link.',
         },
         givenName: {
           type: 'string',
@@ -164,21 +165,32 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
           type: 'string',
           description: 'The department the user belongs to.',
         },
+        usageLocation: {
+          type: 'string',
+          description:
+            "Two-letter ISO 3166-1 alpha-2 code used for licensing eligibility, such as 'US'.",
+        },
         country: {
           type: 'string',
           description:
             "Two-letter ISO 3166-1 alpha-2 country code representing the user's location (e.g. 'US', 'GB').",
         },
+        mustChangePasswordNextSignIn: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Whether the new user must change the initial password at first sign-in. Defaults to true.',
+        },
       },
-      required: ['tenantFilter', 'displayName', 'userPrincipalName', 'password'],
+      required: ['tenantFilter', 'displayName', 'userPrincipalName'],
     },
   },
   {
     name: 'cipp_edit_user',
     description:
       "⚠ HIGH-IMPACT. Edits an existing user's properties, which can include " +
-      'directory attributes, usage location, and may grant or revoke roles or ' +
-      'license eligibility. Reversible by editing again. ' +
+      'display name, job title, department, and usage location. ' +
+      'Use cipp_manage_user_licenses for license changes. Reversible by editing again. ' +
       'Confirm with the user before invoking.',
     annotations: {
       title: 'Edit user (high-impact)',
@@ -212,16 +224,37 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
           description:
             "Two-letter ISO 3166-1 alpha-2 country code for license assignment eligibility (e.g. 'US'). Required before assigning most Microsoft 365 licences.",
         },
-        licenses: {
+      },
+      required: ['tenantFilter', 'userId'],
+    },
+  },
+  {
+    name: 'cipp_manage_user_licenses',
+    description:
+      'WRITE. Add and/or remove specific Microsoft 365 license SKU IDs for one user. ' +
+      'Unmentioned licenses are preserved. Use cipp_list_licenses to discover SKU IDs. ' +
+      'Confirm with the user before invoking.',
+    annotations: {
+      title: 'Manage user licenses',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tenantFilter: TENANT_FILTER_PROP,
+        userId: USER_ID_PROP,
+        addLicenseSkuIds: {
           type: 'array',
           items: { type: 'string' },
-          description:
-            'License SKU GUIDs the user should hold after the edit (CIPP reconciles: missing SKUs are added, extra assigned SKUs are removed). Use cipp_list_licenses to discover SKU ids. Mutually exclusive with removeLicenses=true.',
+          description: 'License SKU GUIDs to add while preserving all other assigned licenses.',
         },
-        removeLicenses: {
-          type: 'boolean',
-          description:
-            '⚠ When true, strips EVERY license assigned to the user. Mutually exclusive with a non-empty licenses list.',
+        removeLicenseSkuIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'License SKU GUIDs to remove while preserving all other assigned licenses.',
         },
       },
       required: ['tenantFilter', 'userId'],
@@ -251,8 +284,9 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'cipp_reset_password',
     description:
-      '⚠ HIGH-IMPACT. Resets a user\'s password, invalidating their current ' +
-      'password. Reversible by setting a new password. Confirm with the user before invoking.',
+      '⚠ HIGH-IMPACT. Resets a user\'s password to a CIPP-generated random value, ' +
+      'invalidating the current password. CIPP returns the generated password or a ' +
+      'Password Pusher link. Confirm with the user before invoking.',
     annotations: {
       title: 'Reset password (reversible)',
       readOnlyHint: false,
@@ -265,10 +299,11 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         tenantFilter: TENANT_FILTER_PROP,
         userId: USER_ID_PROP,
-        newPassword: {
-          type: 'string',
+        mustChangePasswordNextSignIn: {
+          type: 'boolean',
+          default: true,
           description:
-            'The replacement password to set. If omitted, a random password is generated and returned in the response.',
+            'Whether a cloud-only user must change the generated password at next sign-in. Defaults to true. Directory-synced password writeback always requires a change.',
         },
       },
       required: ['tenantFilter', 'userId'],
@@ -278,7 +313,7 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
     name: 'cipp_reset_mfa',
     description:
       '⚠ HIGH-IMPACT. Resets all MFA methods for a user, requiring them to ' +
-      're-register their authentication methods. Reversible by re-enabling MFA. Confirm with the user before invoking.',
+      're-register their authentication methods. Confirm with the user before invoking.',
     annotations: {
       title: 'Reset MFA (reversible)',
       readOnlyHint: false,
@@ -525,16 +560,16 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
-    name: 'cipp_create_group',
+    name: 'cipp_create_distribution_group',
     description:
-      '⚠ HIGH-IMPACT. Creates a new group in the tenant, which can be used for ' +
-      'security policy assignments (RBAC, Conditional Access) or mail distribution. ' +
+      'WRITE. Creates one classic Exchange distribution group in a single tenant. ' +
+      'This does not create Microsoft 365, security, dynamic, or role-assignable groups. ' +
       'Reversible by deleting the group. Confirm with the user before invoking.',
     annotations: {
-      title: 'Create group (high-impact)',
+      title: 'Create distribution group',
       readOnlyHint: false,
       destructiveHint: true,
-      idempotentHint: true,
+      idempotentHint: false,
       openWorldHint: true,
     },
     inputSchema: {
@@ -549,23 +584,28 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
           type: 'string',
           description: 'Optional free-text description of the group purpose.',
         },
-        securityEnabled: {
-          type: 'boolean',
-          description:
-            'When true, the group can be used for security policy assignments (RBAC, Conditional Access, etc.).',
-        },
-        mailEnabled: {
-          type: 'boolean',
-          description:
-            'When true, the group is mail-enabled and can receive email. Required for Microsoft 365 groups.',
-        },
-        mailNickname: {
+        primaryEmailAddress: {
           type: 'string',
           description:
-            'The mail alias used as the local part of the group email address (e.g. "finance-team" for finance-team@contoso.com). Required when mailEnabled is true.',
+            'Primary SMTP address for the new distribution group, such as finance@contoso.com.',
+        },
+        allowExternal: {
+          type: 'boolean',
+          default: false,
+          description: 'Whether senders outside the organization may email the group.',
+        },
+        owners: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional user UPNs to assign as initial group owners.',
+        },
+        members: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional user UPNs to add as initial group members.',
         },
       },
-      required: ['tenantFilter', 'displayName'],
+      required: ['tenantFilter', 'displayName', 'primaryEmailAddress'],
     },
   },
   {
@@ -1213,6 +1253,7 @@ export const TOOL_CATEGORIES: Record<string, string[]> = {
     'cipp_list_users',
     'cipp_create_user',
     'cipp_edit_user',
+    'cipp_manage_user_licenses',
     'cipp_disable_user',
     'cipp_reset_password',
     'cipp_reset_mfa',
@@ -1225,7 +1266,7 @@ export const TOOL_CATEGORIES: Record<string, string[]> = {
   ],
   groups: [
     'cipp_list_groups',
-    'cipp_create_group',
+    'cipp_create_distribution_group',
     'cipp_modify_distribution_group_member',
   ],
   mailboxes: [
