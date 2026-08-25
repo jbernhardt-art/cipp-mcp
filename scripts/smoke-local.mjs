@@ -14,13 +14,18 @@ try {
 
   const listed = await client.listTools();
   const toolNames = listed.tools.map((tool) => tool.name).sort();
-  const expected = ['cipp_get_version', 'cipp_list_tenants', 'cipp_ping'];
+  const safeCalls = ['cipp_get_version', 'cipp_list_tenants', 'cipp_ping'];
+  const missing = safeCalls.filter((name) => !toolNames.includes(name));
 
-  if (JSON.stringify(toolNames) !== JSON.stringify(expected)) {
-    throw new Error(`Unexpected exposed tools: ${toolNames.join(', ')}`);
+  if (missing.length > 0) {
+    throw new Error(`Missing required connection-test tools: ${missing.join(', ')}`);
   }
 
-  for (const name of expected) {
+  console.log(`Tool discovery: OK (${toolNames.length} exposed)`);
+
+  // Never invoke write tools from the smoke test. Additional allowlisted tools
+  // are expected as the local deployment grows.
+  for (const name of safeCalls) {
     const result = await client.callTool({ name, arguments: {} });
     if (result.isError) {
       throw new Error(`${name} returned an MCP error`);

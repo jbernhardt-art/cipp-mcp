@@ -50,7 +50,7 @@ const USER_ID_PROP = {
 // Tool Definitions
 // ---------------------------------------------------------------------------
 
-export const TOOL_DEFINITIONS: McpToolDefinition[] = [
+const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
   // -------------------------------------------------------------------------
   // Tenant tools
   // -------------------------------------------------------------------------
@@ -1144,6 +1144,60 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
 ];
+
+/**
+ * Tools that only retrieve or calculate information. Apply consistent MCP
+ * annotations centrally so Codex can treat them as read-only even when an
+ * older individual definition did not declare annotations.
+ */
+export const READ_ONLY_TOOL_NAMES = [
+  'cipp_list_tenants',
+  'cipp_get_tenant_details',
+  'cipp_list_users',
+  'cipp_bec_check',
+  'cipp_list_mfa_users',
+  'cipp_list_user_devices',
+  'cipp_list_user_groups',
+  'cipp_list_groups',
+  'cipp_list_mailboxes',
+  'cipp_list_mailbox_permissions',
+  'cipp_list_conditional_access_policies',
+  'cipp_list_named_locations',
+  'cipp_list_enterprise_apps',
+  'cipp_list_standards',
+  'cipp_list_standard_templates',
+  'cipp_get_tenant_drift',
+  'cipp_get_tenant_alignment',
+  'cipp_list_bpa',
+  'cipp_list_domain_health',
+  'cipp_list_licenses',
+  'cipp_list_csp_licenses',
+  'cipp_list_audit_logs',
+  'cipp_list_alert_queue',
+  'cipp_list_gdap_roles',
+  'cipp_list_gdap_invites',
+  'cipp_list_scheduled_items',
+  'cipp_ping',
+  'cipp_get_version',
+  'cipp_list_logs',
+] as const;
+
+const readOnlyToolNames = new Set<string>(READ_ONLY_TOOL_NAMES);
+
+export const TOOL_DEFINITIONS: McpToolDefinition[] = RAW_TOOL_DEFINITIONS.map((tool) =>
+  readOnlyToolNames.has(tool.name)
+    ? {
+        ...tool,
+        annotations: {
+          ...tool.annotations,
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      }
+    : tool
+);
 
 // ---------------------------------------------------------------------------
 // Tool Categories
