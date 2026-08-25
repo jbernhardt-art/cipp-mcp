@@ -20,6 +20,7 @@ import {
   parseCredentialsFromHeaders,
   loadEnvironmentConfig,
   mergeWithMcpConfig,
+  parseEnabledTools,
 } from '../src/utils/config.js';
 import { CippService } from '../src/services/cipp.service.js';
 import { Logger } from '../src/utils/logger.js';
@@ -43,6 +44,22 @@ describe('cleanCredential', () => {
   it('preserves and trims real credentials', () => {
     expect(cleanCredential('real-api-key')).toBe('real-api-key');
     expect(cleanCredential('  real-api-key  ')).toBe('real-api-key');
+  });
+});
+
+describe('parseEnabledTools', () => {
+  it('defaults to the safe connection-test allowlist', () => {
+    expect(parseEnabledTools(undefined)).toEqual([
+      'cipp_ping',
+      'cipp_get_version',
+      'cipp_list_tenants',
+    ]);
+  });
+
+  it('normalizes and deduplicates an explicit allowlist', () => {
+    expect(
+      parseEnabledTools(' cipp_ping, cipp_reset_password,cipp_ping ')
+    ).toEqual(['cipp_ping', 'cipp_reset_password']);
   });
 });
 

@@ -57,6 +57,13 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'cipp_list_tenants',
     description: 'List all tenants managed in CIPP',
+    annotations: {
+      title: 'List tenants',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -1046,6 +1053,13 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'cipp_ping',
     description: 'Check CIPP API connectivity',
+    annotations: {
+      title: 'Check CIPP connectivity',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -1054,6 +1068,13 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'cipp_get_version',
     description: 'Get CIPP version information',
+    annotations: {
+      title: 'Get CIPP version',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {},

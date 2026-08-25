@@ -48,11 +48,18 @@ Set these environment variables (or copy `.env.example` to `.env`):
 | `CIPP_TENANT_ID` | One of | Entra tenant ID that owns the CIPP API-client app registration. |
 | `CIPP_CLIENT_ID` | One of | OAuth client ID issued by CIPP's API Client Management page. |
 | `CIPP_CLIENT_SECRET` | One of | OAuth client secret paired with `CIPP_CLIENT_ID`. |
-| `CIPP_TOKEN_SCOPE` | No | Override OAuth scope (default: `<clientId>/.default`). |
+| `CIPP_TOKEN_SCOPE` | No | Override OAuth scope (default: `api://<clientId>/.default`). |
 | `CIPP_TOKEN_URL` | No | Override OAuth token endpoint (sovereign clouds only). |
 | `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
 | `MCP_HTTP_PORT` | No | Port for HTTP mode (default: 8080) |
 | `LOG_LEVEL` | No | `error`, `warn`, `info` (default), or `debug` |
+| `CIPP_ENABLED_TOOLS` | No | Comma-separated server-side allowlist. Defaults to `cipp_ping,cipp_get_version,cipp_list_tenants`. |
+
+The server fails closed by default: only the three read-only connection-test
+tools above are exposed and callable. Add exact tool names to
+`CIPP_ENABLED_TOOLS` only after granting the matching CIPP API permissions and
+reviewing the operation. Calls to tools outside the allowlist are rejected even
+if an MCP client attempts to invoke them directly.
 
 > [!IMPORTANT]
 > `CIPP_BASE_URL` must be the **Azure Function App** URL — the CIPP-API backend,

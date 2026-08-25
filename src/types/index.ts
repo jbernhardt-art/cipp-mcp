@@ -32,7 +32,7 @@ export interface McpServerConfig {
     clientId?: string;
     /** Application secret value issued for the CIPP API client. */
     clientSecret?: string;
-    /** Optional OAuth scope override. Defaults to `<clientId>/.default`. */
+    /** Optional OAuth scope override. Defaults to `api://<clientId>/.default`. */
     tokenScope?: string;
     /** Optional full token endpoint URL override (sovereign clouds / custom STS). */
     tokenUrl?: string;

@@ -8,6 +8,18 @@ import { LogLevel } from './logger.js';
 export type TransportType = 'stdio' | 'http';
 export type AuthMode = 'env' | 'gateway';
 
+export const DEFAULT_ENABLED_TOOLS = [
+  'cipp_ping',
+  'cipp_get_version',
+  'cipp_list_tenants',
+] as const;
+
+export function parseEnabledTools(value: string | undefined): string[] {
+  if (!value?.trim()) return [...DEFAULT_ENABLED_TOOLS];
+
+  return [...new Set(value.split(',').map((name) => name.trim()).filter(Boolean))];
+}
+
 /**
  * Fully-resolved environment configuration for the CIPP MCP server.
  * Populated by {@link loadEnvironmentConfig} and consumed by the server
@@ -53,6 +65,10 @@ export interface EnvironmentConfig {
   /** Authentication mode that controls how credentials are sourced. */
   auth: {
     mode: AuthMode;
+  };
+  /** Server-side tool exposure policy. Calls outside this list are rejected. */
+  security: {
+    enabledTools: string[];
   };
 }
 
@@ -182,7 +198,7 @@ export function parseCredentialsFromHeaders(
  * | `CIPP_TENANT_ID`    | Entra tenant ID (OAuth client-credentials flow)     | –                |
  * | `CIPP_CLIENT_ID`    | OAuth client ID of the CIPP API-client app reg      | –                |
  * | `CIPP_CLIENT_SECRET`| OAuth client secret                                 | –                |
- * | `CIPP_TOKEN_SCOPE`  | Override OAuth scope                                | `<clientId>/.default` |
+ * | `CIPP_TOKEN_SCOPE`  | Override OAuth scope                                | `api://<clientId>/.default` |
  * | `CIPP_TOKEN_URL`    | Override OAuth token endpoint URL                   | Entra v2.0       |
  * | `AUTH_MODE`         | `env` (default) or `gateway`                        | `env`            |
  * | `MCP_TRANSPORT`     | `stdio` (default) or `http`                         | `stdio`          |
@@ -192,6 +208,7 @@ export function parseCredentialsFromHeaders(
  * | `MCP_SERVER_VERSION`| Server version surfaced to MCP clients              | `1.0.0`          |
  * | `LOG_LEVEL`         | Winston log level (`error`/`warn`/`info`/`debug`)   | `info`           |
  * | `LOG_FORMAT`        | Log output format (`json` or `simple`)              | `simple`         |
+ * | `CIPP_ENABLED_TOOLS`| Comma-separated server-side tool allowlist          | safe read-only tools |
  *
  * @throws {Error} If `MCP_TRANSPORT` is set to an unsupported value.
  */
@@ -248,6 +265,9 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     },
     auth: {
       mode: authMode,
+    },
+    security: {
+      enabledTools: parseEnabledTools(process.env.CIPP_ENABLED_TOOLS),
     },
   };
 }

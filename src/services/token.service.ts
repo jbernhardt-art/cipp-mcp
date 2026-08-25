@@ -20,10 +20,9 @@ export interface TokenProviderConfig {
   /** Application secret value issued for the CIPP API client. */
   clientSecret: string;
   /**
-   * OAuth scope to request. Typically the CIPP-SAM application's
-   * `api://<sam-app-id>/.default`. Defaults to `<clientId>/.default`, which
-   * is correct when the CIPP-API integration page lists the API client as
-   * its own resource. Override when CIPP displays a different scope.
+   * OAuth scope to request. CIPP API clients use
+   * `api://<clientId>/.default`. Override only when the CIPP integration page
+   * explicitly displays a different API scope.
    */
   scope?: string;
   /**
@@ -94,7 +93,7 @@ export class TokenProvider {
   }
 
   private get scope(): string {
-    return this.config.scope || `${this.config.clientId}/.default`;
+    return this.config.scope || `api://${this.config.clientId}/.default`;
   }
 
   private async fetchToken(): Promise<string> {

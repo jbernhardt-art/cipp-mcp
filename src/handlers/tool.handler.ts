@@ -6,20 +6,51 @@ import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { CippService, OutOfOfficeInput } from '../services/cipp.service.js';
 import { Logger } from '../utils/logger.js';
 import { TOOL_DEFINITIONS } from '../mcp/tool.definitions.js';
+import { DEFAULT_ENABLED_TOOLS } from '../utils/config.js';
 
 export interface McpToolResult {
   content: Array<{ type: string; text: string }>;
   isError?: boolean;
 }
 
+const SENSITIVE_KEY = /(password|secret|token|authorization|api[-_]?key|credential)/i;
+
+export function redactSensitiveValues(
+  value: unknown,
+  key = '',
+  seen = new WeakSet<object>()
+): unknown {
+  if (SENSITIVE_KEY.test(key)) return '[REDACTED]';
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSensitiveValues(item, key, seen));
+  }
+  if (typeof value === 'object' && value !== null) {
+    if (seen.has(value)) return '[Circular Reference]';
+    seen.add(value);
+    return Object.fromEntries(
+      Object.entries(value).map(([childKey, childValue]) => [
+        childKey,
+        redactSensitiveValues(childValue, childKey, seen),
+      ])
+    );
+  }
+  return value;
+}
+
 export class CippToolHandler {
   private cippService: CippService;
   private logger: Logger;
   private mcpServer: Server | null = null;
+  private enabledTools: Set<string>;
 
-  constructor(cippService: CippService, logger: Logger) {
+  constructor(
+    cippService: CippService,
+    logger: Logger,
+    enabledTools: readonly string[] = DEFAULT_ENABLED_TOOLS
+  ) {
     this.cippService = cippService;
     this.logger = logger;
+    this.enabledTools = new Set(enabledTools);
   }
 
   setServer(server: Server): void {
@@ -31,11 +62,20 @@ export class CippToolHandler {
   }
 
   getToolDefinitions() {
-    return TOOL_DEFINITIONS;
+    return TOOL_DEFINITIONS.filter((tool) => this.enabledTools.has(tool.name));
   }
 
   async handleToolCall(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
-    this.logger.debug(`Dispatching tool call: ${name}`, { args });
+    if (!this.enabledTools.has(name)) {
+      throw new McpError(
+        ErrorCode.MethodNotFound,
+        `Tool is disabled by the server-side allowlist: ${name}`
+      );
+    }
+
+    this.logger.debug(`Dispatching tool call: ${name}`, {
+      args: redactSensitiveValues(args),
+    });
 
     try {
       let result: unknown;

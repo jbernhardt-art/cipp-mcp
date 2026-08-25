@@ -38,7 +38,11 @@ export class CippMcpServer {
     this.envConfig = envConfig;
 
     this.cippService = new CippService(config, logger);
-    this.toolHandler = new CippToolHandler(this.cippService, logger);
+    this.toolHandler = new CippToolHandler(
+      this.cippService,
+      logger,
+      envConfig?.security.enabledTools
+    );
 
     this.server = this.createFreshServer();
   }
@@ -242,7 +246,11 @@ Tool categories:
           };
 
           cippService = new CippService(requestConfig, this.logger);
-          toolHandler = new CippToolHandler(cippService, this.logger);
+          toolHandler = new CippToolHandler(
+            cippService,
+            this.logger,
+            this.envConfig?.security.enabledTools
+          );
         }
 
         const server = new Server(
