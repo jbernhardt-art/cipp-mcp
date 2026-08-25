@@ -187,6 +187,9 @@ export interface ScheduledItemInput {
   parameters?: Record<string, unknown>;
 }
 
+/** Supported membership actions for the narrowly-scoped distribution-list tool. */
+export type DistributionGroupMemberAction = 'add' | 'remove';
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -803,6 +806,114 @@ export class CippService {
     groupData: Record<string, unknown>
   ): Promise<T> {
     return this.request<T>('POST', 'AddGroup', undefined, { tenantFilter, ...groupData });
+  }
+
+  /**
+   * Add or remove one user from a cloud-managed distribution list.
+   *
+   * The live ListGroups lookup is a fail-closed type and sync-authority guard.
+   * It prevents this narrow wrapper from being used against Microsoft 365,
+   * security, mail-enabled security, dynamic, or on-premises-synced groups even
+   * though CIPP's underlying ExecGroupMembers endpoint supports broader targets.
+   */
+  async modifyDistributionGroupMember<T = unknown>(
+    tenantFilter: string,
+    groupId: string,
+    memberUserPrincipalName: string,
+    action: DistributionGroupMemberAction
+  ): Promise<T> {
+    const tenant = tenantFilter.trim();
+    const id = groupId.trim();
+    const member = memberUserPrincipalName.trim();
+
+    if (!tenant || tenant.toLowerCase() === 'alltenants') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'tenantFilter must identify exactly one tenant; allTenants is not allowed for writes.'
+      );
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'groupId must be the Entra object ID (GUID) of exactly one distribution list.'
+      );
+    }
+    if (!/^[^\s@]+@[^\s@]+$/.test(member)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'memberUserPrincipalName must be one user UPN, such as alice@contoso.com.'
+      );
+    }
+    if (action !== 'add' && action !== 'remove') {
+      throw new McpError(ErrorCode.InvalidParams, 'action must be either "add" or "remove".');
+    }
+
+    const groupLookup = await this.request<{
+      groupInfo?: {
+        id?: string;
+        displayName?: string;
+        groupType?: string;
+        mailEnabled?: boolean;
+        securityEnabled?: boolean;
+        groupTypes?: string[];
+        onPremisesSyncEnabled?: boolean;
+      };
+    }>('GET', 'ListGroups', { tenantFilter: tenant, groupID: id });
+
+    const group = groupLookup?.groupInfo;
+    const isDistributionList =
+      group?.id?.toLowerCase() === id.toLowerCase() &&
+      group.groupType === 'Distribution List' &&
+      group.mailEnabled === true &&
+      group.securityEnabled === false &&
+      (!Array.isArray(group.groupTypes) || group.groupTypes.length === 0);
+
+    if (!isDistributionList) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Refusing write: the target could not be verified as a distribution list.'
+      );
+    }
+    if (group.onPremisesSyncEnabled === true) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Refusing write: this distribution list is synchronized from on-premises and must be changed at its source.'
+      );
+    }
+
+    // ExecGroupMembers accepts users, groups, and other directory objects.
+    // Resolve through ListUsers first so an email-shaped group address cannot
+    // turn this user-only wrapper into a nested-group membership tool.
+    const identity = await this.resolveUserIdentity(tenant, member);
+
+    const cippAction = action === 'add' ? 'addMember' : 'removeMember';
+    const response = await this.request<{ Results?: unknown }>(
+      'POST',
+      'ExecGroupMembers',
+      undefined,
+      {
+        action: cippAction,
+        groupId: id,
+        tenantFilter: tenant,
+        users: [identity.userPrincipalName],
+      }
+    );
+    const { results, failures } = interpretResults(response?.Results);
+
+    return {
+      status: failures.length > 0 ? 'failed' : 'modified',
+      action,
+      tenantFilter: tenant,
+      groupId: id,
+      groupDisplayName: group.displayName,
+      memberUserPrincipalName: identity.userPrincipalName,
+      results,
+      failures,
+      message:
+        failures.length > 0
+          ? `CIPP reported a failure while attempting to ${action} ${identity.userPrincipalName} ${action === 'add' ? 'to' : 'from'} ${group.displayName ?? id}. Do NOT report success: ${failures.join(' | ')}`
+          : `CIPP reports that ${identity.userPrincipalName} was ${action === 'add' ? 'added to' : 'removed from'} distribution list ${group.displayName ?? id}.`,
+    } as T;
   }
 
   // -------------------------------------------------------------------------

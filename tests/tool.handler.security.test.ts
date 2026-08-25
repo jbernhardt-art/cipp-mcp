@@ -65,4 +65,26 @@ describe('CippToolHandler security policy', () => {
       },
     });
   });
+
+  it('dispatches the narrow distribution-list membership tool', async () => {
+    const modifyDistributionGroupMember = jest.fn(async () => ({ status: 'modified' }));
+    const writeService = { modifyDistributionGroupMember } as unknown as CippService;
+    const handler = new CippToolHandler(writeService, logger, [
+      'cipp_modify_distribution_group_member',
+    ]);
+
+    await handler.handleToolCall('cipp_modify_distribution_group_member', {
+      tenantFilter: 'contoso.com',
+      groupId: '11111111-1111-4111-8111-111111111111',
+      memberUserPrincipalName: 'alice@contoso.com',
+      action: 'add',
+    });
+
+    expect(modifyDistributionGroupMember).toHaveBeenCalledWith(
+      'contoso.com',
+      '11111111-1111-4111-8111-111111111111',
+      'alice@contoso.com',
+      'add'
+    );
+  });
 });

@@ -504,6 +504,13 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
   {
     name: 'cipp_list_groups',
     description: 'List groups in a tenant',
+    annotations: {
+      title: 'List groups',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -559,6 +566,48 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
         },
       },
       required: ['tenantFilter', 'displayName'],
+    },
+  },
+  {
+    name: 'cipp_modify_distribution_group_member',
+    description:
+      'WRITE. Add or remove exactly one user from a cloud-managed distribution list. ' +
+      'The target group must be supplied by Entra object ID and is verified live as a ' +
+      'distribution list before the change. This tool cannot modify owners, contacts, ' +
+      'Microsoft 365 groups, security groups, mail-enabled security groups, dynamic groups, ' +
+      'or on-premises-synchronized groups. Obtain explicit user confirmation immediately before invoking.',
+    annotations: {
+      title: 'Modify distribution-list membership',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tenantFilter: {
+          type: 'string',
+          description:
+            "One tenant's domain name or ID. The special allTenants value is rejected for writes.",
+        },
+        groupId: {
+          type: 'string',
+          description: 'Entra object ID (GUID) of the distribution list.',
+          pattern:
+            '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+        },
+        memberUserPrincipalName: {
+          type: 'string',
+          description: 'UPN of exactly one user to add or remove, such as alice@contoso.com.',
+        },
+        action: {
+          type: 'string',
+          enum: ['add', 'remove'],
+          description: 'Whether to add or remove the user from the distribution list.',
+        },
+      },
+      required: ['tenantFilter', 'groupId', 'memberUserPrincipalName', 'action'],
     },
   },
 
@@ -1120,7 +1169,11 @@ export const TOOL_CATEGORIES: Record<string, string[]> = {
     'cipp_list_user_devices',
     'cipp_list_user_groups',
   ],
-  groups: ['cipp_list_groups', 'cipp_create_group'],
+  groups: [
+    'cipp_list_groups',
+    'cipp_create_group',
+    'cipp_modify_distribution_group_member',
+  ],
   mailboxes: [
     'cipp_list_mailboxes',
     'cipp_list_mailbox_permissions',

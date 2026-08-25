@@ -61,6 +61,15 @@ tools above are exposed and callable. Add exact tool names to
 reviewing the operation. Calls to tools outside the allowlist are rejected even
 if an MCP client attempts to invoke them directly.
 
+For CIPP 10.9.1 or later, the optional
+`cipp_modify_distribution_group_member` tool can add or remove one user at a
+time from a verified cloud-managed distribution list. It requires
+`Identity.Group.Read`, `Identity.User.Read`, and `Identity.Group.ReadWrite` on
+the CIPP API client.
+Add `cipp_list_groups,cipp_modify_distribution_group_member` to
+`CIPP_ENABLED_TOOLS` only when that write capability is intentional. The
+wrapper rejects all-tenants operations and every other group type.
+
 > [!IMPORTANT]
 > `CIPP_BASE_URL` must be the **Azure Function App** URL — the CIPP-API backend,
 > `https://<function-app-name>.azurewebsites.net` — **not** the Static Web App /

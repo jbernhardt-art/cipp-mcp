@@ -279,6 +279,22 @@ export class CippToolHandler {
           break;
         }
 
+        case 'cipp_modify_distribution_group_member': {
+          const { tenantFilter, groupId, memberUserPrincipalName, action } = args as {
+            tenantFilter: string;
+            groupId: string;
+            memberUserPrincipalName: string;
+            action: 'add' | 'remove';
+          };
+          result = await this.cippService.modifyDistributionGroupMember(
+            tenantFilter,
+            groupId,
+            memberUserPrincipalName,
+            action
+          );
+          break;
+        }
+
         // -----------------------------------------------------------------------
         // Mailboxes
         // -----------------------------------------------------------------------
