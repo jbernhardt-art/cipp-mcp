@@ -57,6 +57,7 @@ Set these environment variables (or copy `.env.example` to `.env`):
 | `MCP_HTTP_TRUST_PROXY` | No | Trust the first `X-Forwarded-For` address for audit logs. Enable only when the MCP container is reachable exclusively through the trusted proxy. |
 | `LOG_LEVEL` | No | `error`, `warn`, `info` (default), or `debug` |
 | `CIPP_ENABLED_TOOLS` | No | Comma-separated server-side allowlist. Defaults to `cipp_ping,cipp_get_version,cipp_list_tenants`. |
+| `CIPP_READ_CACHE_TTL_SECONDS` | No | In-memory cache TTL for tenant and user-list reads. Defaults to `300`; use `0` to disable. Writes invalidate the cache. |
 
 The server fails closed by default: only the three read-only connection-test
 tools above are exposed and callable. Add exact tool names to
@@ -68,6 +69,11 @@ HTTP bearer authentication maps each token hash to a caller ID and writes a
 structured audit event for each tool call. Audit events include caller, tool,
 result, duration, and source address. Tool arguments and bearer tokens are not
 logged.
+
+The tenant list and exact user-list queries use a short-lived in-memory cache.
+Identical requests already in progress share one CIPP API request. Any CIPP
+write clears the cache before it is attempted, so write verification does not
+reuse pre-write user data.
 
 The included internal deployment publishes CIPP at
 `https://msp-mcp-server.servpac.com/cipp/mcp`. Caddy strips the `/cipp` prefix

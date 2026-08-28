@@ -44,6 +44,7 @@ describe('HTTP MCP bearer authentication boundary', () => {
       server: { name: 'cipp-auth-test', version: '1.0.0' },
       transport: { type: 'http', host: HOST, port: PORT },
       logging: { level: 'error', format: 'simple' },
+      cache: { readTtlMs: 300000 },
       auth: {
         mode: 'env',
         httpClientMode: 'bearer',

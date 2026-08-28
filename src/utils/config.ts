@@ -64,6 +64,10 @@ export interface EnvironmentConfig {
     level: LogLevel;
     format: 'json' | 'simple';
   };
+  /** Short-lived cache for expensive, generic read endpoints. */
+  cache: {
+    readTtlMs: number;
+  };
   /** Authentication mode that controls how credentials are sourced. */
   auth: {
     mode: AuthMode;
@@ -217,6 +221,7 @@ export function parseCredentialsFromHeaders(
  * | `MCP_HTTP_CLIENT_AUTH` | HTTP client auth: `none` or `bearer`            | `none`           |
  * | `MCP_HTTP_BEARER_TOKEN_HASHES` | `caller=<sha256>` entries, comma-separated | -             |
  * | `MCP_HTTP_TRUST_PROXY` | Trust first `X-Forwarded-For` address for audit logs | `false`      |
+ * | `CIPP_READ_CACHE_TTL_SECONDS` | Tenant/user read-cache TTL; `0` disables it | `300`        |
  *
  * @throws {Error} If `MCP_TRANSPORT` is set to an unsupported value.
  */
@@ -272,6 +277,13 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     );
   }
 
+  const readCacheTtlSeconds = Number(process.env.CIPP_READ_CACHE_TTL_SECONDS ?? '300');
+  if (!Number.isInteger(readCacheTtlSeconds) || readCacheTtlSeconds < 0 || readCacheTtlSeconds > 3600) {
+    throw new Error(
+      'Invalid CIPP_READ_CACHE_TTL_SECONDS value. Use a whole number from 0 through 3600.'
+    );
+  }
+
   return {
     cipp: cippConfig,
     server: {
@@ -286,6 +298,9 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     logging: {
       level: (process.env.LOG_LEVEL as LogLevel) || 'info',
       format: (process.env.LOG_FORMAT as 'json' | 'simple') || 'simple',
+    },
+    cache: {
+      readTtlMs: readCacheTtlSeconds * 1000,
     },
     auth: {
       mode: authMode,

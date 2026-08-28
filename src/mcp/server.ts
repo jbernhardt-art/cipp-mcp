@@ -39,7 +39,9 @@ export class CippMcpServer {
     this.config = config;
     this.envConfig = envConfig;
 
-    this.cippService = new CippService(config, logger);
+    this.cippService = new CippService(config, logger, {
+      readCacheTtlMs: envConfig?.cache.readTtlMs,
+    });
     this.toolHandler = new CippToolHandler(
       this.cippService,
       logger,
@@ -92,6 +94,8 @@ CIPP MCP Server — M365 multi-tenant management platform for MSPs.
 
 Use tenantFilter to scope operations to a specific tenant domain (e.g. "contoso.com").
 Most listing tools accept 'allTenants' as tenantFilter to query across every managed tenant.
+Cold CIPP reads can take up to a minute. Wait for the result and never repeat a read that returned successfully.
+Tenant and user-list reads are cached briefly and identical in-flight reads are combined.
 
 Always confirm destructive operations (disable user, offboard user, reset password) before executing.
 
@@ -271,7 +275,9 @@ Tool categories:
             },
           };
 
-          cippService = new CippService(requestConfig, this.logger);
+          cippService = new CippService(requestConfig, this.logger, {
+            readCacheTtlMs: this.envConfig?.cache.readTtlMs,
+          });
           toolHandler = new CippToolHandler(
             cippService,
             this.logger,

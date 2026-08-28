@@ -27,6 +27,21 @@ interface CippServiceConfig {
   };
 }
 
+interface CippServiceOptions {
+  /** TTL for the narrow tenant/user read cache. Zero disables caching. */
+  readCacheTtlMs?: number;
+}
+
+interface ReadCacheEntry {
+  expiresAt: number;
+  value: unknown;
+}
+
+interface InFlightRead {
+  generation: number;
+  promise: Promise<unknown>;
+}
+
 /** Aggregated DNS health for a single domain (SPF / DMARC / DKIM). */
 export interface DomainHealthCheck {
   domain: string;
@@ -214,12 +229,17 @@ export class CippService {
   private readonly apiKey: string | undefined;
   private readonly tokenProvider: TokenProvider | undefined;
   private readonly logger: Logger;
+  private readonly readCacheTtlMs: number;
+  private readonly readCache = new Map<string, ReadCacheEntry>();
+  private readonly inFlightReads = new Map<string, InFlightRead>();
+  private readCacheGeneration = 0;
 
-  constructor(config: CippServiceConfig, logger: Logger) {
+  constructor(config: CippServiceConfig, logger: Logger, options: CippServiceOptions = {}) {
     const { baseUrl, apiKey, tenantId, clientId, clientSecret, tokenScope, tokenUrl } = config.cipp;
     this.baseUrl = baseUrl ? baseUrl.replace(/\/$/, '') : undefined;
     this.apiKey = apiKey;
     this.logger = logger;
+    this.readCacheTtlMs = Math.max(0, options.readCacheTtlMs ?? 0);
 
     // If a static apiKey was supplied, prefer it (backwards-compatible behaviour).
     // Otherwise, if OAuth client-credentials fields are present, build a token
@@ -242,6 +262,52 @@ export class CippService {
   // Private helpers
   // -------------------------------------------------------------------------
 
+  private async cachedRead<T>(key: string, loader: () => Promise<T>): Promise<T> {
+    if (this.readCacheTtlMs === 0) return loader();
+
+    const cached = this.readCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      this.logger.debug('CIPP read cache hit', { key });
+      return cached.value as T;
+    }
+    if (cached) this.readCache.delete(key);
+
+    const inFlight = this.inFlightReads.get(key);
+    if (inFlight?.generation === this.readCacheGeneration) {
+      this.logger.debug('CIPP read request coalesced', { key });
+      return inFlight.promise as Promise<T>;
+    }
+
+    this.logger.debug('CIPP read cache miss', { key });
+    const generation = this.readCacheGeneration;
+    const pending = loader()
+      .then((value) => {
+        if (generation === this.readCacheGeneration) {
+          this.readCache.set(key, {
+            expiresAt: Date.now() + this.readCacheTtlMs,
+            value,
+          });
+        }
+        return value;
+      })
+      .finally(() => {
+        const current = this.inFlightReads.get(key);
+        if (current?.promise === pending) this.inFlightReads.delete(key);
+      });
+
+    this.inFlightReads.set(key, { generation, promise: pending as Promise<unknown> });
+    return pending;
+  }
+
+  private invalidateReadCache(): void {
+    this.readCacheGeneration += 1;
+    if (this.readCache.size > 0 || this.inFlightReads.size > 0) {
+      this.logger.debug('Invalidating CIPP tenant/user read cache after write');
+      this.readCache.clear();
+      this.inFlightReads.clear();
+    }
+  }
+
   /**
    * Send an HTTP request to the CIPP API.
    *
@@ -262,6 +328,12 @@ export class CippService {
     body?: Record<string, unknown>,
     timeoutMs?: number
   ): Promise<T> {
+    // CIPP uses POST for several reads, so only known read-only POST endpoints
+    // are exempt. Clearing before a write is deliberate: a network timeout can
+    // be ambiguous, and serving a pre-write cache after it would be unsafe.
+    if (method !== 'GET' && path !== 'ListTenants' && path !== 'ListScheduledItems') {
+      this.invalidateReadCache();
+    }
     if (!this.baseUrl) {
       throw new McpError(ErrorCode.InvalidParams, 'CIPP_BASE_URL is not configured. Set it in your environment or MCP client config.');
     }
@@ -398,9 +470,12 @@ export class CippService {
    * @param params.allTenants - When `true`, returns all tenants including inactive ones.
    */
   async listTenants<T = unknown>(params?: { allTenants?: boolean }): Promise<T> {
-    return this.request<T>('POST', 'ListTenants', undefined, {
-      allTenantSelector: params?.allTenants,
-    });
+    const allTenants = params?.allTenants === true;
+    return this.cachedRead(`ListTenants:${allTenants}`, () =>
+      this.request<T>('POST', 'ListTenants', undefined, {
+        allTenantSelector: params?.allTenants,
+      })
+    );
   }
 
   /**
@@ -458,7 +533,8 @@ export class CippService {
           : `${field} eq '${escaped}'`;
     }
 
-    return this.request<T>('GET', 'ListUsers', query);
+    const cacheKey = `ListUsers:${tenantFilter.trim().toLowerCase()}:${field ?? ''}:${value ?? ''}`;
+    return this.cachedRead(cacheKey, () => this.request<T>('GET', 'ListUsers', query));
   }
 
   /**

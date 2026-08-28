@@ -44,6 +44,7 @@ services:
       - MCP_HTTP_BEARER_TOKEN_HASHES=${MCP_HTTP_BEARER_TOKEN_HASHES}
       - MCP_HTTP_TRUST_PROXY=${MCP_HTTP_TRUST_PROXY:-true}
       - CIPP_ENABLED_TOOLS=${CIPP_ENABLED_TOOLS}
+      - CIPP_READ_CACHE_TTL_SECONDS=${CIPP_READ_CACHE_TTL_SECONDS:-300}
       - NODE_ENV=production
     volumes:
       - cipp-mcp-logs:/app/logs
