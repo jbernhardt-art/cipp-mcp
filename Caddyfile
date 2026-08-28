@@ -1,0 +1,16 @@
+https://msp-mcp-server.servpac.com {
+	tls /etc/letsencrypt/live/msp-mcp-server.servpac.com/fullchain.pem /etc/letsencrypt/live/msp-mcp-server.servpac.com/privkey.pem
+
+	handle_path /cipp/* {
+		reverse_proxy cipp-mcp:8080
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

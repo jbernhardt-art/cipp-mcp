@@ -4,9 +4,11 @@
 
 import { McpServerConfig } from '../types/index.js';
 import { LogLevel } from './logger.js';
+import { HttpClientTokenHash, parseHttpClientTokenHashes } from '../http-client-auth.js';
 
 export type TransportType = 'stdio' | 'http';
 export type AuthMode = 'env' | 'gateway';
+export type HttpClientAuthMode = 'none' | 'bearer';
 
 export const DEFAULT_ENABLED_TOOLS = [
   'cipp_ping',
@@ -65,6 +67,9 @@ export interface EnvironmentConfig {
   /** Authentication mode that controls how credentials are sourced. */
   auth: {
     mode: AuthMode;
+    httpClientMode: HttpClientAuthMode;
+    httpClientTokenHashes: HttpClientTokenHash[];
+    trustProxy: boolean;
   };
   /** Server-side tool exposure policy. Calls outside this list are rejected. */
   security: {
@@ -209,6 +214,9 @@ export function parseCredentialsFromHeaders(
  * | `LOG_LEVEL`         | Winston log level (`error`/`warn`/`info`/`debug`)   | `info`           |
  * | `LOG_FORMAT`        | Log output format (`json` or `simple`)              | `simple`         |
  * | `CIPP_ENABLED_TOOLS`| Comma-separated server-side tool allowlist          | safe read-only tools |
+ * | `MCP_HTTP_CLIENT_AUTH` | HTTP client auth: `none` or `bearer`            | `none`           |
+ * | `MCP_HTTP_BEARER_TOKEN_HASHES` | `caller=<sha256>` entries, comma-separated | -             |
+ * | `MCP_HTTP_TRUST_PROXY` | Trust first `X-Forwarded-For` address for audit logs | `false`      |
  *
  * @throws {Error} If `MCP_TRANSPORT` is set to an unsupported value.
  */
@@ -248,6 +256,22 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     );
   }
 
+  const httpClientMode =
+    (process.env.MCP_HTTP_CLIENT_AUTH as HttpClientAuthMode) || 'none';
+  if (httpClientMode !== 'none' && httpClientMode !== 'bearer') {
+    throw new Error(
+      `Invalid MCP_HTTP_CLIENT_AUTH value: "${httpClientMode}". Must be "none" or "bearer".`
+    );
+  }
+  const httpClientTokenHashes = parseHttpClientTokenHashes(
+    process.env.MCP_HTTP_BEARER_TOKEN_HASHES
+  );
+  if (transportType === 'http' && httpClientMode === 'bearer' && httpClientTokenHashes.length === 0) {
+    throw new Error(
+      'MCP_HTTP_CLIENT_AUTH=bearer requires at least one caller=<sha256> entry in MCP_HTTP_BEARER_TOKEN_HASHES.'
+    );
+  }
+
   return {
     cipp: cippConfig,
     server: {
@@ -265,6 +289,9 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     },
     auth: {
       mode: authMode,
+      httpClientMode,
+      httpClientTokenHashes,
+      trustProxy: process.env.MCP_HTTP_TRUST_PROXY?.toLowerCase() === 'true',
     },
     security: {
       enabledTools: parseEnabledTools(process.env.CIPP_ENABLED_TOOLS),

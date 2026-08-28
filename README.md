@@ -52,6 +52,9 @@ Set these environment variables (or copy `.env.example` to `.env`):
 | `CIPP_TOKEN_URL` | No | Override OAuth token endpoint (sovereign clouds only). |
 | `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
 | `MCP_HTTP_PORT` | No | Port for HTTP mode (default: 8080) |
+| `MCP_HTTP_CLIENT_AUTH` | No | HTTP client authentication: `none` (default) or `bearer`. The production Compose deployment defaults to `bearer`. |
+| `MCP_HTTP_BEARER_TOKEN_HASHES` | With bearer auth | Comma-separated `caller=<sha256>` records. Store token hashes only, never raw engineer tokens. |
+| `MCP_HTTP_TRUST_PROXY` | No | Trust the first `X-Forwarded-For` address for audit logs. Enable only when the MCP container is reachable exclusively through the trusted proxy. |
 | `LOG_LEVEL` | No | `error`, `warn`, `info` (default), or `debug` |
 | `CIPP_ENABLED_TOOLS` | No | Comma-separated server-side allowlist. Defaults to `cipp_ping,cipp_get_version,cipp_list_tenants`. |
 
@@ -60,6 +63,17 @@ tools above are exposed and callable. Add exact tool names to
 `CIPP_ENABLED_TOOLS` only after granting the matching CIPP API permissions and
 reviewing the operation. Calls to tools outside the allowlist are rejected even
 if an MCP client attempts to invoke them directly.
+
+HTTP bearer authentication maps each token hash to a caller ID and writes a
+structured audit event for each tool call. Audit events include caller, tool,
+result, duration, and source address. Tool arguments and bearer tokens are not
+logged.
+
+The included internal deployment publishes CIPP at
+`https://msp-mcp-server.servpac.com/cipp/mcp`. Caddy strips the `/cipp` prefix
+and forwards `/mcp` to the private CIPP MCP container. Additional MCP servers
+can use separate prefixes and containers without publishing additional host
+ports.
 
 For CIPP 10.9.1 or later, reviewed write tools cover user lifecycle, selected
 mailbox settings, and classic distribution groups. Each write remains disabled

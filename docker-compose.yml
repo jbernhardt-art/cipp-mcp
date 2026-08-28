@@ -1,4 +1,21 @@
 services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: cipp-mcp-caddy
+    restart: unless-stopped
+    depends_on:
+      cipp-mcp:
+        condition: service_healthy
+    ports:
+      - "${MCP_HTTPS_BIND_IP}:443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+
   cipp-mcp:
     build:
       context: .
@@ -23,6 +40,10 @@ services:
       - MCP_HTTP_PORT=8080
       - MCP_HTTP_HOST=0.0.0.0
       - AUTH_MODE=${AUTH_MODE:-env}
+      - MCP_HTTP_CLIENT_AUTH=${MCP_HTTP_CLIENT_AUTH:-bearer}
+      - MCP_HTTP_BEARER_TOKEN_HASHES=${MCP_HTTP_BEARER_TOKEN_HASHES}
+      - MCP_HTTP_TRUST_PROXY=${MCP_HTTP_TRUST_PROXY:-true}
+      - CIPP_ENABLED_TOOLS=${CIPP_ENABLED_TOOLS}
       - NODE_ENV=production
     volumes:
       - cipp-mcp-logs:/app/logs
@@ -34,6 +55,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -81,6 +104,10 @@ services:
     tty: true
 
 volumes:
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
   cipp-mcp-logs:
     driver: local
   cipp-mcp-dev-logs:

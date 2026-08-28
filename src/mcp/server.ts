@@ -3,6 +3,7 @@
 // Supports both local (env-based) and gateway (header-based) credential modes.
 
 import { createServer, IncomingMessage, ServerResponse, Server as HttpServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -16,6 +17,7 @@ import { McpServerConfig } from '../types/index.js';
 import { EnvironmentConfig, parseCredentialsFromHeaders } from '../utils/config.js';
 import { CippToolHandler } from '../handlers/tool.handler.js';
 import { verifyS2sHeader, S2S_HEADER } from '../s2s-verify.js';
+import { authenticateHttpBearer } from '../http-client-auth.js';
 
 // Conduit service-to-service auth (gateway#377 parity). Non-empty =
 // enforce X-Gateway-S2S on every /mcp request; empty = disabled, behavior
@@ -164,6 +166,9 @@ Tool categories:
     const port = this.envConfig?.transport?.port || 8080;
     const host = this.envConfig?.transport?.host || '0.0.0.0';
     const isGatewayMode = this.envConfig?.auth?.mode === 'gateway';
+    const httpClientAuthMode = this.envConfig?.auth?.httpClientMode || 'none';
+    const httpClientTokenHashes = this.envConfig?.auth?.httpClientTokenHashes || [];
+    const trustProxy = this.envConfig?.auth?.trustProxy || false;
 
     this.httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -187,6 +192,27 @@ Tool categories:
             })
           );
           return;
+        }
+
+        let callerId = 'unauthenticated';
+        if (httpClientAuthMode === 'bearer') {
+          const identity = authenticateHttpBearer(
+            req.headers.authorization,
+            httpClientTokenHashes
+          );
+          if (!identity) {
+            this.logger.warn('MCP client authentication rejected', {
+              event: 'mcp_auth_rejected',
+              remoteAddress: this.getRemoteAddress(req, trustProxy),
+            });
+            res.writeHead(401, {
+              'Content-Type': 'application/json',
+              'WWW-Authenticate': 'Bearer realm="cipp-mcp"',
+            });
+            res.end(JSON.stringify({ error: 'Missing or invalid bearer token' }));
+            return;
+          }
+          callerId = identity.callerId;
         }
 
         if (req.method !== 'POST') {
@@ -269,15 +295,39 @@ Tool categories:
         }));
 
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
-          this.logger.debug(`Handling tool call: ${request.params.name}`);
+          const requestId = randomUUID();
+          const startedAt = Date.now();
+          this.logger.info('MCP tool call started', {
+            event: 'mcp_tool_call_started',
+            requestId,
+            callerId,
+            tool: request.params.name,
+            remoteAddress: this.getRemoteAddress(req, trustProxy),
+          });
           try {
             const result = await toolHandler.handleToolCall(
               request.params.name,
               (request.params.arguments as Record<string, unknown>) || {}
             );
+            this.logger.info('MCP tool call completed', {
+              event: 'mcp_tool_call_completed',
+              requestId,
+              callerId,
+              tool: request.params.name,
+              outcome: result.isError ? 'tool_error' : 'success',
+              durationMs: Date.now() - startedAt,
+            });
             return { content: result.content, isError: result.isError };
           } catch (error) {
-            this.logger.error(`Failed to call tool ${request.params.name}:`, error);
+            this.logger.error('MCP tool call failed', {
+              event: 'mcp_tool_call_failed',
+              requestId,
+              callerId,
+              tool: request.params.name,
+              outcome: 'exception',
+              durationMs: Date.now() - startedAt,
+              errorType: error instanceof Error ? error.name : 'UnknownError',
+            });
             const message = error instanceof Error ? error.message : 'Unknown error';
             return {
               content: [{ type: 'text', text: message }],
@@ -331,9 +381,22 @@ Tool categories:
         this.logger.info(
           `Authentication mode: ${isGatewayMode ? 'gateway (header-based)' : 'env (environment variables)'}`
         );
+        this.logger.info(
+          `HTTP client authentication: ${httpClientAuthMode === 'bearer' ? `bearer (${httpClientTokenHashes.length} callers)` : 'none'}`
+        );
         resolve();
       });
     });
+  }
+
+  private getRemoteAddress(req: IncomingMessage, trustProxy: boolean): string | undefined {
+    if (trustProxy) {
+      const forwarded = req.headers['x-forwarded-for'];
+      const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+      const first = value?.split(',')[0]?.trim();
+      if (first) return first;
+    }
+    return req.socket.remoteAddress;
   }
 
   /**
