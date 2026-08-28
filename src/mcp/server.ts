@@ -96,6 +96,8 @@ Use tenantFilter to scope operations to a specific tenant domain (e.g. "contoso.
 Most listing tools accept 'allTenants' as tenantFilter to query across every managed tenant.
 Cold CIPP reads can take up to a minute. Wait for the result and never repeat a read that returned successfully.
 Tenant and user-list reads are cached briefly and identical in-flight reads are combined.
+For a known complete UPN or email address, call cipp_list_users directly with an exact searchField and searchValue. Do not list tenants first.
+For tenant-wide user questions, use cipp_list_users filters and request only the fields needed. Compact mode is the default. Use full mode only when raw CIPP/Graph objects are necessary because it can return megabytes of data.
 
 Always confirm destructive operations (disable user, offboard user, reset password) before executing.
 

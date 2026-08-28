@@ -15,6 +15,131 @@ export interface McpToolResult {
 
 const SENSITIVE_KEY = /(password|secret|token|authorization|api[-_]?key|credential)/i;
 
+const DEFAULT_COMPACT_USER_FIELDS = [
+  'id',
+  'accountEnabled',
+  'displayName',
+  'userPrincipalName',
+  'mail',
+  'userType',
+  'jobTitle',
+  'department',
+  'usageLocation',
+  'assignedLicenses',
+  'LicJoined',
+] as const;
+
+const ALLOWED_COMPACT_USER_FIELDS = new Set<string>([
+  ...DEFAULT_COMPACT_USER_FIELDS,
+  'givenName',
+  'surname',
+  'companyName',
+  'country',
+  'city',
+  'officeLocation',
+  'mobilePhone',
+  'businessPhones',
+  'createdDateTime',
+  'onPremisesSyncEnabled',
+  'username',
+  'Aliases',
+]);
+
+export interface ListUsersOutputOptions {
+  licensedOnly?: boolean;
+  accountEnabled?: boolean;
+  userType?: 'Member' | 'Guest';
+  fields?: string[];
+  responseMode?: 'compact' | 'full';
+  limit?: number;
+}
+
+export interface ShapedListUsersResult {
+  users: Array<Record<string, unknown>>;
+  count: number;
+  totalMatched: number;
+  truncated: boolean;
+  responseMode: 'compact' | 'full';
+}
+
+function hasAssignedLicense(user: Record<string, unknown>): boolean {
+  return Array.isArray(user.assignedLicenses) && user.assignedLicenses.length > 0;
+}
+
+function projectUser(user: Record<string, unknown>, fields: readonly string[]) {
+  return Object.fromEntries(fields.map((field) => [field, user[field]]));
+}
+
+export function shapeListUsersResult(
+  value: unknown,
+  options: ListUsersOutputOptions
+): ShapedListUsersResult {
+  if (!Array.isArray(value)) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      'CIPP returned an unexpected ListUsers response instead of a user array.'
+    );
+  }
+
+  const responseMode = options.responseMode ?? 'compact';
+  if (responseMode === 'full' && options.fields !== undefined) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'fields cannot be combined with responseMode "full". Use compact mode for field selection.'
+    );
+  }
+
+  const fields = options.fields ?? [...DEFAULT_COMPACT_USER_FIELDS];
+  const invalidFields = fields.filter((field) => !ALLOWED_COMPACT_USER_FIELDS.has(field));
+  if (invalidFields.length > 0) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Unsupported user fields: ${invalidFields.join(', ')}`
+    );
+  }
+
+  if (
+    options.limit !== undefined &&
+    (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 1000)
+  ) {
+    throw new McpError(ErrorCode.InvalidParams, 'limit must be an integer from 1 through 1000.');
+  }
+
+  const matched = value.filter((candidate): candidate is Record<string, unknown> => {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+      return false;
+    }
+    if (options.licensedOnly === true && !hasAssignedLicense(candidate)) return false;
+    if (
+      options.accountEnabled !== undefined &&
+      candidate.accountEnabled !== options.accountEnabled
+    ) {
+      return false;
+    }
+    if (
+      options.userType !== undefined &&
+      (typeof candidate.userType !== 'string' ||
+        candidate.userType.toLowerCase() !== options.userType.toLowerCase())
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const totalMatched = matched.length;
+  const limited = options.limit === undefined ? matched : matched.slice(0, options.limit);
+  const users =
+    responseMode === 'full' ? limited : limited.map((user) => projectUser(user, fields));
+
+  return {
+    users,
+    count: users.length,
+    totalMatched,
+    truncated: users.length < totalMatched,
+    responseMode,
+  };
+}
+
 export function redactSensitiveValues(
   value: unknown,
   key = '',
@@ -100,12 +225,33 @@ export class CippToolHandler {
         // Users
         // -----------------------------------------------------------------------
         case 'cipp_list_users': {
-          const { tenantFilter, searchField, searchValue } = args as {
+          const {
+            tenantFilter,
+            searchField,
+            searchValue,
+            licensedOnly,
+            accountEnabled,
+            userType,
+            fields,
+            responseMode,
+            limit,
+          } = args as unknown as {
             tenantFilter: string;
             searchField?: string;
             searchValue?: string;
-          };
-          result = await this.cippService.listUsers(tenantFilter, { searchField, searchValue });
+          } & ListUsersOutputOptions;
+          const users = await this.cippService.listUsers(tenantFilter, {
+            searchField,
+            searchValue,
+          });
+          result = shapeListUsersResult(users, {
+            licensedOnly,
+            accountEnabled,
+            userType,
+            fields,
+            responseMode,
+            limit,
+          });
           break;
         }
 

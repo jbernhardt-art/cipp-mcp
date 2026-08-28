@@ -95,7 +95,17 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
   // -------------------------------------------------------------------------
   {
     name: 'cipp_list_users',
-    description: 'List users in a tenant',
+    description:
+      'List or find users in a tenant. Returns compact user records by default to avoid oversized responses. ' +
+      'When a complete UPN or email address is known, use searchField and searchValue so CIPP performs one exact filtered query. ' +
+      'Use the generic filters and fields option for tenant-wide questions. Request responseMode "full" only when raw CIPP/Graph objects are truly required.',
+    annotations: {
+      title: 'List or find users',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -110,6 +120,68 @@ const RAW_TOOL_DEFINITIONS: McpToolDefinition[] = [
           type: 'string',
           description:
             'Value to match against the chosen searchField. displayName matches on prefix; userPrincipalName and mail must match exactly. Omit both search parameters to list every user in the tenant.',
+        },
+        licensedOnly: {
+          type: 'boolean',
+          description: 'When true, return only users with at least one assigned license.',
+        },
+        accountEnabled: {
+          type: 'boolean',
+          description: 'Return only enabled users when true or only disabled users when false.',
+        },
+        userType: {
+          type: 'string',
+          enum: ['Member', 'Guest'],
+          description: 'Return only directory members or guests.',
+        },
+        fields: {
+          type: 'array',
+          minItems: 1,
+          uniqueItems: true,
+          items: {
+            type: 'string',
+            enum: [
+              'id',
+              'accountEnabled',
+              'displayName',
+              'userPrincipalName',
+              'mail',
+              'userType',
+              'givenName',
+              'surname',
+              'jobTitle',
+              'department',
+              'companyName',
+              'usageLocation',
+              'country',
+              'city',
+              'officeLocation',
+              'mobilePhone',
+              'businessPhones',
+              'createdDateTime',
+              'onPremisesSyncEnabled',
+              'assignedLicenses',
+              'LicJoined',
+              'username',
+              'Aliases',
+            ],
+          },
+          description:
+            'Optional compact-mode field selection. Omit for the standard compact user fields. Cannot be combined with responseMode "full".',
+        },
+        responseMode: {
+          type: 'string',
+          enum: ['compact', 'full'],
+          default: 'compact',
+          description:
+            'compact returns only useful user fields and is the default. full returns raw CIPP/Graph user objects and can be extremely large.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 1000,
+          description:
+            'Maximum number of matched users to return. The response reports whether results were truncated.',
         },
       },
       required: ['tenantFilter'],
