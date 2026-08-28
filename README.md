@@ -55,6 +55,9 @@ Set these environment variables (or copy `.env.example` to `.env`):
 | `MCP_HTTP_CLIENT_AUTH` | No | HTTP client authentication: `none` (default) or `bearer`. The production Compose deployment defaults to `bearer`. |
 | `MCP_HTTP_BEARER_TOKEN_HASHES` | With bearer auth | Comma-separated `caller=<sha256>` records. Store token hashes only, never raw engineer tokens. |
 | `MCP_HTTP_TRUST_PROXY` | No | Trust the first `X-Forwarded-For` address for audit logs. Enable only when the MCP container is reachable exclusively through the trusted proxy. |
+| `MCP_AUDIT_LOG_FILE` | No | Persistent audit-log path. The shared deployment defaults to `/app/logs/audit.log`. |
+| `MCP_AUDIT_LOG_MAX_SIZE_MB` | No | Maximum audit-file size before rotation. Defaults to 10 MiB. |
+| `MCP_AUDIT_LOG_MAX_FILES` | No | Number of rotated audit files retained. Defaults to 10. |
 | `LOG_LEVEL` | No | `error`, `warn`, `info` (default), or `debug` |
 | `CIPP_ENABLED_TOOLS` | No | Comma-separated server-side allowlist. Defaults to `cipp_ping,cipp_get_version,cipp_list_tenants`. |
 | `CIPP_READ_CACHE_TTL_SECONDS` | No | In-memory cache TTL for tenant and user-list reads. Defaults to `300`; use `0` to disable. Writes invalidate the cache. |
@@ -67,8 +70,19 @@ if an MCP client attempts to invoke them directly.
 
 HTTP bearer authentication maps each token hash to a caller ID and writes a
 structured audit event for each tool call. Audit events include caller, tool,
-result, duration, and source address. Tool arguments and bearer tokens are not
-logged.
+result, duration, source address, tenant, and an explicitly allowlisted target
+summary where applicable. Raw tool arguments are never logged. Passwords,
+secrets, tokens, message bodies, forwarding destinations, and arbitrary task
+parameters are excluded.
+
+The shared Docker deployment persists these audit events in the
+`cipp-mcp-logs` volume. The active file is `/app/logs/audit.log`; it rotates at
+10 MiB and retains 10 files by default. Docker console logs are separately
+limited to five 10 MiB files. View the persistent audit trail over SSH with:
+
+```bash
+docker compose exec cipp-mcp sh -c 'cat /app/logs/audit*.log'
+```
 
 The tenant list and exact user-list queries use a short-lived in-memory cache.
 Identical requests already in progress share one CIPP API request. Any CIPP

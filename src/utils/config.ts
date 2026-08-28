@@ -63,6 +63,11 @@ export interface EnvironmentConfig {
   logging: {
     level: LogLevel;
     format: 'json' | 'simple';
+    auditFile?: {
+      filename: string;
+      maxSizeBytes: number;
+      maxFiles: number;
+    };
   };
   /** Short-lived cache for expensive, generic read endpoints. */
   cache: {
@@ -217,6 +222,9 @@ export function parseCredentialsFromHeaders(
  * | `MCP_SERVER_VERSION`| Server version surfaced to MCP clients              | `1.0.0`          |
  * | `LOG_LEVEL`         | Winston log level (`error`/`warn`/`info`/`debug`)   | `info`           |
  * | `LOG_FORMAT`        | Log output format (`json` or `simple`)              | `simple`         |
+ * | `MCP_AUDIT_LOG_FILE` | Optional persistent JSON audit-log path             | disabled         |
+ * | `MCP_AUDIT_LOG_MAX_SIZE_MB` | Rotated audit-file size in MiB              | `10`             |
+ * | `MCP_AUDIT_LOG_MAX_FILES` | Number of rotated audit files retained           | `10`             |
  * | `CIPP_ENABLED_TOOLS`| Comma-separated server-side tool allowlist          | safe read-only tools |
  * | `MCP_HTTP_CLIENT_AUTH` | HTTP client auth: `none` or `bearer`            | `none`           |
  * | `MCP_HTTP_BEARER_TOKEN_HASHES` | `caller=<sha256>` entries, comma-separated | -             |
@@ -284,6 +292,34 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     );
   }
 
+  const auditLogFilename = process.env.MCP_AUDIT_LOG_FILE?.trim();
+  const auditLogMaxSizeMb = Number(process.env.MCP_AUDIT_LOG_MAX_SIZE_MB ?? '10');
+  const auditLogMaxFiles = Number(process.env.MCP_AUDIT_LOG_MAX_FILES ?? '10');
+  if (
+    auditLogFilename &&
+    (!Number.isInteger(auditLogMaxSizeMb) || auditLogMaxSizeMb < 1 || auditLogMaxSizeMb > 100)
+  ) {
+    throw new Error('Invalid MCP_AUDIT_LOG_MAX_SIZE_MB value. Use a whole number from 1 through 100.');
+  }
+  if (
+    auditLogFilename &&
+    (!Number.isInteger(auditLogMaxFiles) || auditLogMaxFiles < 1 || auditLogMaxFiles > 100)
+  ) {
+    throw new Error('Invalid MCP_AUDIT_LOG_MAX_FILES value. Use a whole number from 1 through 100.');
+  }
+
+  const loggingConfig: EnvironmentConfig['logging'] = {
+    level: (process.env.LOG_LEVEL as LogLevel) || 'info',
+    format: (process.env.LOG_FORMAT as 'json' | 'simple') || 'simple',
+  };
+  if (auditLogFilename) {
+    loggingConfig.auditFile = {
+      filename: auditLogFilename,
+      maxSizeBytes: auditLogMaxSizeMb * 1024 * 1024,
+      maxFiles: auditLogMaxFiles,
+    };
+  }
+
   return {
     cipp: cippConfig,
     server: {
@@ -295,10 +331,7 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
       port: parseInt(process.env.MCP_HTTP_PORT || '8080', 10),
       host: process.env.MCP_HTTP_HOST || '0.0.0.0',
     },
-    logging: {
-      level: (process.env.LOG_LEVEL as LogLevel) || 'info',
-      format: (process.env.LOG_FORMAT as 'json' | 'simple') || 'simple',
-    },
+    logging: loggingConfig,
     cache: {
       readTtlMs: readCacheTtlSeconds * 1000,
     },

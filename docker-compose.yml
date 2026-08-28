@@ -36,6 +36,9 @@ services:
       - CIPP_TOKEN_URL=${CIPP_TOKEN_URL}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - LOG_FORMAT=${LOG_FORMAT:-json}
+      - MCP_AUDIT_LOG_FILE=${MCP_AUDIT_LOG_FILE:-/app/logs/audit.log}
+      - MCP_AUDIT_LOG_MAX_SIZE_MB=${MCP_AUDIT_LOG_MAX_SIZE_MB:-10}
+      - MCP_AUDIT_LOG_MAX_FILES=${MCP_AUDIT_LOG_MAX_FILES:-10}
       - MCP_TRANSPORT=http
       - MCP_HTTP_PORT=8080
       - MCP_HTTP_HOST=0.0.0.0
@@ -58,6 +61,11 @@ services:
       start_period: 10s
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:

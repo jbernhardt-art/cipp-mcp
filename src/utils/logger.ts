@@ -3,9 +3,17 @@
 // Sends all output to stderr to avoid corrupting the MCP stdio channel.
 
 import winston from 'winston';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 export type LogFormat = 'json' | 'simple';
+
+export interface AuditFileOptions {
+  filename: string;
+  maxSizeBytes: number;
+  maxFiles: number;
+}
 
 /**
  * Safely serialize an object to avoid circular references.
@@ -33,7 +41,41 @@ function safeStringify(obj: any): string {
 export class Logger {
   private winston: winston.Logger;
 
-  constructor(level: LogLevel = 'info', format: LogFormat = 'json') {
+  constructor(
+    level: LogLevel = 'info',
+    format: LogFormat = 'json',
+    auditFile?: AuditFileOptions
+  ) {
+    const transports: winston.transport[] = [
+      new winston.transports.Console({
+        // MCP stdio transport uses stdout for JSON-RPC messages.
+        // All log output must go to stderr to avoid corrupting the channel.
+        stderrLevels: ['error', 'warn', 'info', 'debug'],
+      }),
+    ];
+
+    if (auditFile) {
+      mkdirSync(dirname(auditFile.filename), { recursive: true });
+      const auditEventsOnly = winston.format((info) =>
+        typeof info.event === 'string' && info.event.startsWith('mcp_') ? info : false
+      );
+      transports.push(
+        new winston.transports.File({
+          filename: auditFile.filename,
+          level: 'info',
+          maxsize: auditFile.maxSizeBytes,
+          maxFiles: auditFile.maxFiles,
+          tailable: true,
+          format: winston.format.combine(
+            auditEventsOnly(),
+            winston.format.printf(({ timestamp, level, message, ...meta }) =>
+              safeStringify({ level, message, timestamp, ...meta })
+            )
+          ),
+        })
+      );
+    }
+
     this.winston = winston.createLogger({
       level,
       format: format === 'json'
@@ -56,13 +98,7 @@ export class Logger {
               return `${timestamp} [${level.toUpperCase()}]: ${message}${metaStr}`;
             })
           ),
-      transports: [
-        new winston.transports.Console({
-          // MCP stdio transport uses stdout for JSON-RPC messages.
-          // All log output must go to stderr to avoid corrupting the channel.
-          stderrLevels: ['error', 'warn', 'info', 'debug']
-        })
-      ]
+      transports,
     });
   }
 
@@ -84,5 +120,12 @@ export class Logger {
 
   setLevel(level: LogLevel): void {
     this.winston.level = level;
+  }
+
+  async close(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.winston.once('finish', resolve);
+      this.winston.end();
+    });
   }
 }

@@ -18,6 +18,7 @@ import { EnvironmentConfig, parseCredentialsFromHeaders } from '../utils/config.
 import { CippToolHandler } from '../handlers/tool.handler.js';
 import { verifyS2sHeader, S2S_HEADER } from '../s2s-verify.js';
 import { authenticateHttpBearer } from '../http-client-auth.js';
+import { buildToolAuditContext } from '../audit-context.js';
 
 // Conduit service-to-service auth (gateway#377 parity). Non-empty =
 // enforce X-Gateway-S2S on every /mcp request; empty = disabled, behavior
@@ -305,17 +306,21 @@ Tool categories:
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const requestId = randomUUID();
           const startedAt = Date.now();
+          const toolArgs = (request.params.arguments as Record<string, unknown>) || {};
+          const auditContext = buildToolAuditContext(request.params.name, toolArgs);
+          const remoteAddress = this.getRemoteAddress(req, trustProxy);
           this.logger.info('MCP tool call started', {
             event: 'mcp_tool_call_started',
             requestId,
             callerId,
             tool: request.params.name,
-            remoteAddress: this.getRemoteAddress(req, trustProxy),
+            remoteAddress,
+            ...auditContext,
           });
           try {
             const result = await toolHandler.handleToolCall(
               request.params.name,
-              (request.params.arguments as Record<string, unknown>) || {}
+              toolArgs
             );
             this.logger.info('MCP tool call completed', {
               event: 'mcp_tool_call_completed',
@@ -324,6 +329,8 @@ Tool categories:
               tool: request.params.name,
               outcome: result.isError ? 'tool_error' : 'success',
               durationMs: Date.now() - startedAt,
+              remoteAddress,
+              ...auditContext,
             });
             return { content: result.content, isError: result.isError };
           } catch (error) {
@@ -335,6 +342,8 @@ Tool categories:
               outcome: 'exception',
               durationMs: Date.now() - startedAt,
               errorType: error instanceof Error ? error.name : 'UnknownError',
+              remoteAddress,
+              ...auditContext,
             });
             const message = error instanceof Error ? error.message : 'Unknown error';
             return {

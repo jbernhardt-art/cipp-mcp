@@ -10,7 +10,11 @@ async function main() {
   try {
     const envConfig = loadEnvironmentConfig();
     const mcpConfig = mergeWithMcpConfig(envConfig);
-    logger = new Logger(envConfig.logging.level, envConfig.logging.format);
+    logger = new Logger(
+      envConfig.logging.level,
+      envConfig.logging.format,
+      envConfig.logging.auditFile
+    );
     logger.info('Starting CIPP MCP Server...');
 
     const hasOAuth = !!(mcpConfig.cipp.tenantId && mcpConfig.cipp.clientId && mcpConfig.cipp.clientSecret);
@@ -23,8 +27,14 @@ async function main() {
 
     const server = new CippMcpServer(mcpConfig, logger, envConfig);
 
-    process.on('SIGINT', async () => { logger!.info('Received SIGINT, shutting down...'); await server.stop(); process.exit(0); });
-    process.on('SIGTERM', async () => { logger!.info('Received SIGTERM, shutting down...'); await server.stop(); process.exit(0); });
+    const shutdown = async (signal: string) => {
+      logger!.info(`Received ${signal}, shutting down...`);
+      await server.stop();
+      await logger!.close();
+      process.exit(0);
+    };
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
     await server.start();
   } catch (error) {
