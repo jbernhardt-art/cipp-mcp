@@ -95,6 +95,38 @@ and forwards `/mcp` to the private CIPP MCP container. Additional MCP servers
 can use separate prefixes and containers without publishing additional host
 ports.
 
+### Managing engineer bearer tokens
+
+Each engineer receives a unique raw bearer token. The server stores only a
+`caller=SHA-256-hash` record in `.env`, while the engineer stores the raw token
+in their own Windows user environment. The management script never prints a
+raw token and writes new tokens only to an explicitly requested mode-600 file.
+
+Run the script on the Docker host through the existing Node image:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" -w /work node:26-alpine \
+  node scripts/manage-http-callers.mjs list
+```
+
+Replace `list` with one of these operations:
+
+```text
+add <caller> --token-file private-tokens/<caller>.token
+rotate <caller> --token-file private-tokens/<caller>-replacement.token
+revoke <caller>
+```
+
+After any add, rotate, or revoke operation, apply the updated hash list with:
+
+```bash
+docker compose up -d --force-recreate cipp-mcp
+```
+
+Copy each handoff token through a private channel, then securely remove its
+temporary file from the server. Revocation does not require the raw token.
+
 For CIPP 10.9.1 or later, reviewed write tools cover user lifecycle, selected
 mailbox settings, and classic distribution groups. Each write remains disabled
 unless its exact name is present in `CIPP_ENABLED_TOOLS`. The distribution-group
