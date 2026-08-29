@@ -26,6 +26,34 @@ import { buildToolAuditContext } from '../audit-context.js';
 // container's derived subkey). See src/s2s-verify.ts.
 const S2S_SECRET = process.env.CONDUIT_S2S_SECRET || '';
 
+export const CIPP_MCP_INSTRUCTIONS = `
+Use only this server's exposed CIPP MCP tools for CIPP tenant operations. Never use shell commands, curl, PowerShell, Node.js, or raw HTTP as a fallback to invoke CIPP, invoke this server, or inspect credentials. If a required MCP tool is unavailable or the connection fails, stop and report the limitation instead of bypassing the MCP.
+
+CIPP MCP Server - M365 multi-tenant management platform for MSPs.
+
+Use tenantFilter to scope operations to a specific tenant domain (e.g. "contoso.com").
+Most listing tools accept 'allTenants' as tenantFilter to query across every managed tenant.
+Cold CIPP reads can take up to a minute. Wait for the result and never repeat a read that returned successfully.
+Tenant and user-list reads are cached briefly and identical in-flight reads are combined.
+For a known complete UPN or email address, call cipp_list_users directly with an exact searchField and searchValue. Do not list tenants first.
+For tenant-wide user questions, use cipp_list_users filters and request only the fields needed. Compact mode is the default. Use full mode only when raw CIPP/Graph objects are necessary because it can return megabytes of data.
+
+Always confirm destructive operations (disable user, offboard user, reset password) before executing.
+
+Tool categories:
+- Tenants: list and inspect managed tenants
+- Users: list, create, edit, disable, offboard, MFA/session management, BEC check
+- Groups: list and create Azure AD groups
+- Mailboxes: list mailboxes and permissions, configure OoO and forwarding
+- Security: Conditional Access policies, named locations
+- Standards: compliance standards, BPA results, domain health
+- Licenses: per-tenant and CSP-level license reporting
+- Alerts: audit logs and alert queue
+- GDAP: roles and relationship invites
+- Scheduler: list and create scheduled tasks
+- Core: ping, version, logs
+`.trim();
+
 export class CippMcpServer {
   private server: Server;
   private config: McpServerConfig;
@@ -90,31 +118,7 @@ export class CippMcpServer {
    * Returns instructions that help MCP clients understand how to use this server.
    */
   private getServerInstructions(): string {
-    return `
-CIPP MCP Server — M365 multi-tenant management platform for MSPs.
-
-Use tenantFilter to scope operations to a specific tenant domain (e.g. "contoso.com").
-Most listing tools accept 'allTenants' as tenantFilter to query across every managed tenant.
-Cold CIPP reads can take up to a minute. Wait for the result and never repeat a read that returned successfully.
-Tenant and user-list reads are cached briefly and identical in-flight reads are combined.
-For a known complete UPN or email address, call cipp_list_users directly with an exact searchField and searchValue. Do not list tenants first.
-For tenant-wide user questions, use cipp_list_users filters and request only the fields needed. Compact mode is the default. Use full mode only when raw CIPP/Graph objects are necessary because it can return megabytes of data.
-
-Always confirm destructive operations (disable user, offboard user, reset password) before executing.
-
-Tool categories:
-- Tenants: list and inspect managed tenants
-- Users: list, create, edit, disable, offboard, MFA/session management, BEC check
-- Groups: list and create Azure AD groups
-- Mailboxes: list mailboxes and permissions, configure OoO and forwarding
-- Security: Conditional Access policies, named locations
-- Standards: compliance standards, BPA results, domain health
-- Licenses: per-tenant and CSP-level license reporting
-- Alerts: audit logs and alert queue
-- GDAP: roles and relationship invites
-- Scheduler: list and create scheduled tasks
-- Core: ping, version, logs
-`.trim();
+    return CIPP_MCP_INSTRUCTIONS;
   }
 
   /**
